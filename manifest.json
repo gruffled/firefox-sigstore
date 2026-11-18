@@ -1,0 +1,32 @@
+{
+    "manifest_version": 3,
+    "name": "Sigstore close post-auth tabs",
+    "description": "Automatically close tabs opened by the Sigstore keyless signing flow and Chainguard auth flow.",
+    "version": "0.0.1",
+    "icons": {
+        "16": "images/icon-16.png",
+        "128": "images/icon-128.png"
+    },
+    "background": {
+        "scripts": ["background.js"]
+    },
+    "action": {
+        "default_icon": {
+            "16": "images/icon-16.png"
+        },
+        "default_title": "Tabs closed"
+    },
+    "permissions": [
+        "tabs",
+        "storage"
+    ],
+    "browser_specific_settings": {
+        "gecko": {
+            "id": "sigstore-close-post-auth@gruffled",
+            "strict_min_version": "140.0",
+            "data_collection_permissions": {
+                "required": ["none"]
+            }
+        }
+    }
+}
