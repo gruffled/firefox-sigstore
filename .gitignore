@@ -1,4 +1,7 @@
-# web-ext build/sign output
+# Build output
+dist/
+
+# web-ext output, from test/browser_e2e.py or manual web-ext use
 web-ext-artifacts/
 .amo-upload-uuid
 

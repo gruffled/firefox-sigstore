@@ -1,0 +1,93 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  # Manual run: checks the AMO secrets and validator without creating a version.
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Test
+        run: node test/background.test.mjs
+
+      - name: Build
+        run: scripts/build.sh
+
+  validate:
+    if: github.event_name == 'workflow_dispatch'
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Validate with AMO
+        env:
+          WEB_EXT_API_KEY: ${{ secrets.WEB_EXT_API_KEY }}
+          WEB_EXT_API_SECRET: ${{ secrets.WEB_EXT_API_SECRET }}
+        run: python3 -I scripts/amo_sign.py validate "$(scripts/build.sh)"
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check the tag matches manifest.json
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          version="$(python3 -c 'import json; print(json.load(open("manifest.json"))["version"])')"
+          if [ "$TAG" != "v${version}" ]; then
+            echo "::error::Tag $TAG doesn't match manifest.json version $version"
+            exit 1
+          fi
+          echo "VERSION=${version}" >> "$GITHUB_ENV"
+
+      - name: Sign with AMO
+        env:
+          WEB_EXT_API_KEY: ${{ secrets.WEB_EXT_API_KEY }}
+          WEB_EXT_API_SECRET: ${{ secrets.WEB_EXT_API_SECRET }}
+        run: python3 -I scripts/amo_sign.py sign "$(scripts/build.sh)" "dist/firefox-sigstore-${VERSION}.xpi"
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          xpi="dist/firefox-sigstore-${VERSION}.xpi"
+          sha="$(sha256sum "$xpi" | cut -d' ' -f1)"
+          cat > notes.md <<EOF
+          ## Install
+
+          1. Download \`firefox-sigstore-${VERSION}.xpi\` below.
+          2. Drag it onto a Firefox or Zen window, or open \`about:addons\`, click the gear menu and choose **Install Add-on From File…**
+          3. Click **Add**.
+
+          Mozilla has signed it, so it installs on Firefox 140+ and Zen without changing any settings. Installing it over an older version upgrades it.
+
+          SHA-256: \`${sha}\`
+          EOF
+          gh release create "$TAG" -R "$GITHUB_REPOSITORY" --verify-tag --title "$TAG" \
+            --notes-file notes.md --generate-notes "$xpi"
