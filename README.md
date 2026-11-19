@@ -13,7 +13,8 @@ Fulcio certificate, the signature or the chainctl token.
 It closes a tab only when both of these hold:
 
 - the URL is `http://localhost:<any port>/...` or `http://127.0.0.1:<any port>/...`
-- the title is `Sigstore Authentication` or `Chainguard Authentication`
+- the title and path are `Sigstore Authentication` at `/auth/callback`, or
+  `Chainguard Authentication` at `/callback`
 
 It asks for the `tabs` and `storage` permissions and collects no data.
 

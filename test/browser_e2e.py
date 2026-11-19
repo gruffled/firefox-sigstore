@@ -29,8 +29,9 @@ loads, pings, gone = {}, {}, {}
 
 TITLES = {
     "/launch": "Launcher",
-    "/sig": "Sigstore Authentication",
-    "/cg": "Chainguard Authentication",
+    "/auth/callback": "Sigstore Authentication",
+    "/callback": "Chainguard Authentication",
+    "/other": "Sigstore Authentication",
     "/ctl": "Control page",
 }
 
@@ -97,13 +98,14 @@ threading.Thread(target=srv.serve_forever, daemon=True).start()
 L, IP = f"http://localhost:{port}", f"http://127.0.0.1:{port}"
 start_urls = [
     f"{L}/ctl?id=control",
-    f"{L}/sig?id=sig-at-start",
-    f"{L}/launch?id=launch1&to=/sig?id=sig-navigated",
-    f"{L}/launch?id=launch2&to=/cg?id=cg-navigated",
-    f"{IP}/launch?id=launch3&to=/sig?id=sig-on-127",
+    f"{L}/auth/callback?id=sig-at-start",
+    f"{L}/other?id=sig-other-path",
+    f"{L}/launch?id=launch1&to=/auth/callback?id=sig-navigated",
+    f"{L}/launch?id=launch2&to=/callback?id=cg-navigated",
+    f"{IP}/launch?id=launch3&to=/auth/callback?id=sig-on-127",
 ]
 expect_closed = {"sig-at-start", "sig-navigated", "cg-navigated", "sig-on-127"}
-expect_open = {"control"}
+expect_open = {"control", "sig-other-path"}
 
 cmd = [
     "npx", "--yes", "web-ext@8", "run",
