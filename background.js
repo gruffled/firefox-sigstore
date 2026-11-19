@@ -1,7 +1,10 @@
 // Closes the "auth successful" tabs that cosign, gitsign and chainctl leave
 // open on localhost after their OAuth flows.
 
-const AUTH_TITLES = new Set(["Sigstore Authentication", "Chainguard Authentication"]);
+const AUTH_PATHS = new Map([
+    ["Sigstore Authentication", "/auth/callback"],
+    ["Chainguard Authentication", "/callback"],
+]);
 const AUTH_HOSTS = new Set(["localhost", "127.0.0.1"]);
 const BADGE_COLOR = "#221F5C";
 
@@ -15,12 +18,13 @@ let countQueue = Promise.resolve();
 // Firefox match patterns can't express ports, and the auth callback runs on a
 // random loopback port, so the URL is checked here instead of in a filter.
 function isAuthTab(tab) {
-    if (!tab.url || !AUTH_TITLES.has(tab.title)) {
+    if (!tab.url || !AUTH_PATHS.has(tab.title)) {
         return false;
     }
     try {
         const url = new URL(tab.url);
-        return url.protocol === "http:" && AUTH_HOSTS.has(url.hostname);
+        return url.protocol === "http:" && AUTH_HOSTS.has(url.hostname)
+            && url.pathname === AUTH_PATHS.get(tab.title);
     } catch {
         return false;
     }
@@ -49,7 +53,7 @@ async function closeTab(tab) {
     }
     closing.add(tab.id);
     try {
-        console.log(`closing tab ${tab.id} with title ${tab.title} and url ${tab.url}`);
+        console.log(`closing auth tab ${tab.id}`);
         await browser.tabs.remove(tab.id);
         await incrementCount();
     } catch (err) {
@@ -64,9 +68,14 @@ async function closeExistingAuthTabs() {
     await Promise.all(tabs.filter(isAuthTab).map(closeTab));
 }
 
-async function restoreBadge() {
-    const { count = 0 } = await browser.storage.sync.get("count");
-    await showCount(parseInt(count, 10) || 0);
+function restoreBadge() {
+    countQueue = countQueue
+        .then(async () => {
+            const { count = 0 } = await browser.storage.sync.get("count");
+            await showCount(parseInt(count, 10) || 0);
+        })
+        .catch((err) => console.error("failed to restore badge:", err));
+    return countQueue;
 }
 
 browser.tabs.onUpdated.addListener(
@@ -78,10 +87,14 @@ browser.tabs.onUpdated.addListener(
     { properties: ["url", "title", "status"] }
 );
 
-function onLaunch() {
-    restoreBadge().catch((err) => console.error("failed to restore badge:", err));
-    closeExistingAuthTabs().catch((err) => console.error("failed to sweep tabs:", err));
+async function onLaunch() {
+    await restoreBadge();
+    await closeExistingAuthTabs();
 }
 
-browser.runtime.onStartup.addListener(onLaunch);
-browser.runtime.onInstalled.addListener(onLaunch);
+function launch() {
+    onLaunch().catch((err) => console.error("failed to sweep tabs:", err));
+}
+
+browser.runtime.onStartup.addListener(launch);
+browser.runtime.onInstalled.addListener(launch);
