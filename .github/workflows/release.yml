@@ -26,9 +26,32 @@ jobs:
       - name: Build
         run: scripts/build.sh
 
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Show versions
+        run: |
+          node --version
+          firefox --version
+
+      - name: Lint with web-ext
+        run: scripts/lint.sh
+
+      - name: Test in Firefox
+        env:
+          MOZ_HEADLESS: "1"
+        run: python3 test/browser_e2e.py "$(command -v firefox)"
+
   validate:
     if: github.event_name == 'workflow_dispatch'
-    needs: test
+    needs: [test, browser]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -45,7 +68,7 @@ jobs:
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: test
+    needs: [test, browser]
     runs-on: ubuntu-latest
     permissions:
       contents: write

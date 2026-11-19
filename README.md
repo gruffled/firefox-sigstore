@@ -53,14 +53,24 @@ The browser removes it when it restarts.
 
 ### Test
 
+CI runs all three checks on every push and pull request, and a release goes
+ahead only if they pass. CI runs the browser test in headless Firefox.
+
 ```sh
 # Runs background.js against a stubbed browser API. No browser needed.
 node test/background.test.mjs
 
-# Launches Zen on a throwaway profile with the extension loaded, using
-# `npx web-ext run`. Pass a Firefox binary path to test in Firefox instead.
+# Runs Mozilla's add-on linter on the packaged extension.
+scripts/lint.sh
+
+# Launches Zen on a throwaway profile with the extension loaded and checks
+# which fake auth tabs it closes. Pass a Firefox binary path to test in
+# Firefox instead, and set MOZ_HEADLESS=1 to hide the window.
 python3 test/browser_e2e.py
 ```
+
+The lint and browser test run Mozilla's `web-ext` through `npx`, at the
+version pinned in `scripts/web-ext.sh`.
 
 ### Release
 
