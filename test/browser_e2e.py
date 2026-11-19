@@ -25,8 +25,15 @@ BROWSER = sys.argv[1] if len(sys.argv) > 1 else "/Applications/Zen.app/Contents/
 CWD = tempfile.mkdtemp(prefix="firefox-sigstore-e2e-")
 # The first run may have to download web-ext before the browser starts.
 INSTALL_TIMEOUT = 180
-# How long to keep the browser open once the extension is installed.
-SETTLE_SECONDS = 15
+# After the install, how long to wait for every page to load and every auth
+# tab to close.
+SETTLE_TIMEOUT = 60
+# Then how long to keep the browser open, so the pages that should stay open
+# show that they do.
+HOLD_SECONDS = 5
+# Open pages ping at least once a second, even in background tabs. A page that
+# has been silent this long is treated as closed.
+QUIET_SECONDS = 3
 
 T0 = time.time()
 lock = threading.Lock()
@@ -75,7 +82,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         u = urllib.parse.urlparse(self.path)
         q = urllib.parse.parse_qs(u.query)
         pid = q.get("id", ["?"])[0]
-        now = round(time.time() - T0, 1)
+        now = time.time() - T0
         if u.path == "/ready":
             return self._reply(204 if installed.is_set() else 503)
         with lock:
@@ -179,19 +186,59 @@ def read_output():
 
 threading.Thread(target=read_output, daemon=True).start()
 
-deadline = time.time() + INSTALL_TIMEOUT
-while not installed.wait(1) and proc.poll() is None and time.time() < deadline:
-    pass
-if installed.is_set():
-    print(f"extension installed at t={round(time.time() - T0, 1)}s", flush=True)
-    time.sleep(SETTLE_SECONDS)
-stop = round(time.time() - T0, 1)
+
+def elapsed():
+    return time.time() - T0
+
+
+def fmt(t):
+    return "None" if t is None else f"{t:.1f}"
+
+
+def closed_by(pid, t):
+    """Whether the page had closed by time t: it sent pagehide, or went quiet.
+
+    Call with the lock held.
+    """
+    hide = gone.get(pid)
+    if hide is not None and hide <= t:
+        return True
+    seen = [p for p in pings.get(pid, []) if p <= t]
+    ref = max(seen) if seen else loads.get(pid)
+    return ref is not None and t - ref > QUIET_SECONDS
+
+
+def settled():
+    t = elapsed()
+    with lock:
+        return all(pid in loads for pid in expect_closed | expect_open) and all(
+            closed_by(pid, t) for pid in expect_closed
+        )
+
+
+def wait_until(done, timeout):
+    deadline = time.time() + timeout
+    while proc.poll() is None and time.time() < deadline:
+        if done():
+            return True
+        time.sleep(0.25)
+    return False
+
+
+if wait_until(installed.is_set, INSTALL_TIMEOUT):
+    print(f"extension installed at t={fmt(elapsed())}s", flush=True)
+    if wait_until(settled, SETTLE_TIMEOUT):
+        print(f"all pages loaded and auth tabs closed at t={fmt(elapsed())}s", flush=True)
+        time.sleep(HOLD_SECONDS)
+    else:
+        print(f"gave up waiting for pages at t={fmt(elapsed())}s", flush=True)
+stop = elapsed()
 
 stop_browser()
 srv.shutdown()
 
 if not installed.is_set():
-    print(f"\nRESULT: FAIL (extension not installed by t={stop}s)")
+    print(f"\nRESULT: FAIL (extension not installed by t={fmt(stop)}s)")
     print("\n--- web-ext output tail ---")
     print("".join(out_lines[-60:]))
     sys.exit(1)
@@ -201,7 +248,7 @@ for line in out_lines:
     if any(k in line for k in ("closing auth tab", "failed to", "as a temporary add-on")):
         print("  " + line.rstrip()[:240])
 
-print(f"\nstopped the browser at t={stop}s")
+print(f"\nstopped the browser at t={fmt(stop)}s")
 print(f"{'page':16} {'loaded':>7} {'last ping':>10} {'pagehide':>9}  verdict")
 ok = True
 for pid in sorted(expect_closed | expect_open):
@@ -211,15 +258,15 @@ for pid in sorted(expect_closed | expect_open):
     if loaded is None:
         verdict, good = "NEVER LOADED", False
     else:
-        # Every tab gets pagehide when the browser quits, so a tab counts as
-        # closed only if it sent pagehide or stopped pinging well before that.
-        closed = (hide is not None and hide < stop - 1) or last is None or last < stop - 5
+        # Every page gets pagehide when the browser quits, so judge each one
+        # as it was at `stop`, just before the browser was told to quit.
+        closed = closed_by(pid, stop)
         want = pid in expect_closed
         verdict = "closed" if closed else "open"
         good = closed == want
         verdict += "  OK" if good else f"  FAIL (expected {'closed' if want else 'open'})"
     ok &= good
-    print(f"{pid:16} {str(loaded):>7} {str(last):>10} {str(hide):>9}  {verdict}")
+    print(f"{pid:16} {fmt(loaded):>7} {fmt(last):>10} {fmt(hide):>9}  {verdict}")
 
 print("\nRESULT:", "PASS" if ok else "FAIL")
 if not ok:
